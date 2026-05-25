@@ -1,2 +1,2 @@
-"Period","Method","Forecast","Base_Year"
-"January 2026","5. Holt Trend-Corrected ES",3570.68,"2003=100"
+"Superior_Method","Date_of_Data_Access","Latest_Observation","Latest_Index_Value","Forecast_Target_Period","Forecasted_Value","Base_Year","MAPE","MAD","Bias_ME","MSE","Tracking_Signal"
+"Holt Trend-Corrected Exponential Smoothing","2026-05-25","December 2025",3513.87,"January 2026",3570.68,"2003=100",0.825,5.774,0.913,205.945,39.847

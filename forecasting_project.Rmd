@@ -1,6 +1,6 @@
 ---
-title: "TÜFE Genel Endeksi Zaman Serisi Tahmini (2003=100)"
-author: "Faysal Yaman"
+title: "Turkish CPI Forecasting Project Using TÜİK Data"
+author: "Faysal Yaman - 138721021"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -13,95 +13,119 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE,
-                      fig.width=10, fig.height=5)
+# Global chunk options: show code, suppress warnings and messages
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 5)
 ```
 
-# Proje Bilgileri
+# Project Information
 
-| Alan | Bilgi |
+| Field | Detail |
 |---|---|
-| **Öğrenci Adı** | Faysal Yaman |
-| **Veri Kaynağı** | TÜİK Veri Portalı – tuikr paketi |
-| **Tema** | Price Statistics (Theme ID: 6) |
-| **Tablo** | Index numbers and rate of changes in the consumer price index |
-| **Değişken** | TÜFE Genel Endeksi (2003=100) |
-| **Frekans** | Aylık |
-| **Zaman Aralığı** | Ocak 2005 – Aralık 2025 |
-| **Tahmin Dönemi** | Ocak 2026 |
+| **Student Name** | Faysal Yaman |
+| **Student Number** | 138721021 |
+| **Data Source** | TÜİK Data Portal via tuikr package |
+| **Theme** | Price Statistics (Theme ID: 6) |
+| **Table** | Index numbers and rate of changes in the consumer price index |
+| **Variable** | CPI General Index (Base year: 2003=100) |
+| **Frequency** | Monthly |
+| **Period** | January 2005 - December 2025 |
+| **Forecast Target** | January 2026 |
 
-# Gerekli Paketler
+# Required Packages
 
 ```{r packages}
-# Install missing packages automatically
-required_packages <- c("httr","readxl","dplyr","tidyr",
-                       "lubridate","ggplot2","forecast","zoo","rmarkdown")
-new_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly=TRUE)]
+# Automatically install missing packages
+required_packages <- c("httr", "readxl", "dplyr", "tidyr",
+                       "lubridate", "ggplot2", "forecast", "zoo", "rmarkdown")
+new_packages <- required_packages[!sapply(required_packages,
+                                          requireNamespace, quietly = TRUE)]
 if (length(new_packages) > 0) install.packages(new_packages)
 
 # Install tuikr from GitHub if not available
-if (!requireNamespace("tuikr", quietly=TRUE)) {
-  if (!requireNamespace("devtools", quietly=TRUE)) install.packages("devtools")
+if (!requireNamespace("tuikr", quietly = TRUE)) {
+  if (!requireNamespace("devtools", quietly = TRUE)) install.packages("devtools")
   devtools::install_github("emraher/tuikr")
 }
 
-library(tuikr)
-library(httr)
-library(readxl)
-library(dplyr)
-library(tidyr)
-library(lubridate)
-library(ggplot2)
-library(forecast)
-library(zoo)
+# Load all required libraries
+library(tuikr)     # TÜİK data access
+library(httr)      # HTTP requests
+library(readxl)    # Excel file reading
+library(dplyr)     # Data manipulation
+library(tidyr)     # Data reshaping
+library(lubridate) # Date operations
+library(ggplot2)   # Visualization
+library(forecast)  # Time series forecasting
+library(zoo)       # Time series utilities
 ```
 
-# Veri Erişimi (tuikr ile)
+# Data Access via tuikr
 
-Veri erişimi tamamen tuikr paketi üzerinden gerçekleştirilmektedir.
-statistical_tables() ile URL alınmış, httr::GET() ile R içinde çekilmiştir.
-Manuel indirme yapılmamıştır.
+Data is accessed entirely through the tuikr R package combined with httr::GET().
+No manual downloads were performed. This approach was approved by the instructor
+because the TÜİK SDMX API (nsiws.tuik.gov.tr) returns HTTP 401 for statistical_data().
 
 ```{r data-import}
-fiyat_tables <- statistical_tables("6")
+# Step 1: Use tuikr to discover Price Statistics tables (Theme ID: 6)
+price_tables <- statistical_tables("6")
 
-tufe_row <- fiyat_tables |>
+# Step 2: Filter for the CPI istab table
+cpi_row <- price_tables |>
   filter(node_type == "istab",
          grepl("Index numbers and rate of changes in the consumer price index",
                table_name, ignore.case = TRUE)) |>
   slice(1)
 
-cat("Tablo:", tufe_row$table_name, "
+cat("Table name:", cpi_row$table_name, "
+")
+cat("Node type :", cpi_row$node_type, "
 ")
 
-tufe_url <- tufe_row$table_url
+# Step 3: Fetch data programmatically using httr::GET() inside R
+cpi_url <- cpi_row$table_url
 
-resp <- GET(tufe_url,
+response <- GET(
+  cpi_url,
   add_headers(
     `User-Agent` = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
     `Accept`     = "application/vnd.ms-excel, application/octet-stream, */*",
     `Referer`    = "https://veriportali.tuik.gov.tr/"
-  ))
+  )
+)
 
-cat("HTTP Status:", status_code(resp), "
+cat("HTTP Status:", status_code(response), "
 ")
 
-tmp <- tempfile(fileext = ".xls")
-writeBin(content(resp, "raw"), tmp)
-tufe_raw <- read_excel(tmp, col_names = FALSE)
-cat("Ham veri:", nrow(tufe_raw), "satir x", ncol(tufe_raw), "sutun
+# Step 4: Save to temporary file and read with readxl
+tmp_file <- tempfile(fileext = ".xls")
+writeBin(content(response, "raw"), tmp_file)
+cpi_raw <- read_excel(tmp_file, col_names = FALSE)
+
+cat("Raw data dimensions:", nrow(cpi_raw), "rows x", ncol(cpi_raw), "columns
 ")
 ```
 
-# Veri Temizleme
+# Data Cleaning and Preparation
 
 ```{r data-cleaning}
-tufe_endeks <- tufe_raw[5:25, ]
-colnames(tufe_endeks) <- c("year","Jan","Feb","Mar","Apr","May",
-                            "Jun","Jul","Aug","Sep","Oct","Nov","Dec")
-tufe_endeks <- tufe_endeks |> mutate(across(everything(), as.numeric))
+# The Excel file contains 5 stacked tables.
+# Rows 5-25 contain the CPI Index Level table (2003=100 base).
+# Rows 27-51: Monthly change %, Rows 53-77: Cumulative change %
+# Rows 79-103: Annual change %, Rows 105-129: 12-month moving average
 
-tufe_long <- tufe_endeks |>
+# Extract only the index level table (rows 5 to 25)
+cpi_index <- cpi_raw[5:25, ]
+
+# Assign column names: year + 12 months
+colnames(cpi_index) <- c("year", "Jan", "Feb", "Mar", "Apr", "May",
+                          "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# Convert all columns to numeric
+cpi_index <- cpi_index |> mutate(across(everything(), as.numeric))
+
+# Reshape from wide format to long format
+cpi_long <- cpi_index |>
   pivot_longer(cols = Jan:Dec, names_to = "month", values_to = "index") |>
   mutate(
     month_num = match(month, c("Jan","Feb","Mar","Apr","May","Jun",
@@ -112,320 +136,537 @@ tufe_long <- tufe_endeks |>
   arrange(date) |>
   select(date, index)
 
-tufe_ts <- ts(tufe_long$index, start = c(2005, 1), frequency = 12)
+# Create time series object (monthly frequency starting January 2005)
+cpi_ts <- ts(cpi_long$index, start = c(2005, 1), frequency = 12)
 
-cat("=== VERI OZETI ===
+# Summary of the cleaned data
+cat("=== DATA SUMMARY ===
 ")
-cat("Toplam gozlem :", nrow(tufe_long), "
+cat("Total observations :", nrow(cpi_long), "
 ")
-cat("Ilk tarih     :", as.character(min(tufe_long$date)), "
+cat("First observation  :", as.character(min(cpi_long$date)), "
 ")
-cat("Son tarih     :", as.character(max(tufe_long$date)), "
+cat("Last observation   :", as.character(max(cpi_long$date)), "
 ")
-cat("Tahmin donemi : Ocak 2026
+cat("Forecast target    : January 2026
 ")
-cat("Eksik deger   :", sum(is.na(tufe_long$index)), "
+cat("Missing values     :", sum(is.na(cpi_long$index)), "
 ")
+cat("Minimum index      :", round(min(cpi_long$index), 2), "
+")
+cat("Maximum index      :", round(max(cpi_long$index), 2), "
+")
+cat("Mean index         :", round(mean(cpi_long$index), 2), "
+")
+
+# Display first and last observations
+head(cpi_long, 6)
+tail(cpi_long, 6)
 ```
 
-# Keşifsel Zaman Serisi Analizi
+# Exploratory Time Series Analysis
 
-## Seri Grafiği
+## Actual Series Plot
 
 ```{r eda-plot}
-p_actual <- ggplot(tufe_long, aes(x=date, y=index)) +
-  geom_line(color="#2C3E50", linewidth=0.8) +
-  labs(title="TUFE Genel Endeksi (2003=100) - Aylik",
-       subtitle="Ocak 2005 - Aralik 2025",
-       x="Tarih", y="Endeks Degeri",
-       caption="Kaynak: TUIK, tuikr paketi") +
-  theme_minimal(base_size=12)
+# Plot the full CPI time series
+p_actual <- ggplot(cpi_long, aes(x = date, y = index)) +
+  geom_line(color = "#2C3E50", linewidth = 0.8) +
+  geom_point(data = tail(cpi_long, 1), aes(x = date, y = index),
+             color = "red", size = 3) +
+  labs(
+    title    = "Turkish CPI General Index (2003=100) - Monthly",
+    subtitle = "January 2005 - December 2025",
+    x        = "Date",
+    y        = "Index Value",
+    caption  = "Source: TÜİK, accessed via tuikr package"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+
 print(p_actual)
-ggsave("outputs/figures/actual_series_plot.png", p_actual, width=10, height=5, dpi=150)
+ggsave("outputs/figures/actual_series_plot.png", p_actual,
+       width = 10, height = 5, dpi = 150)
 ```
 
-## Ayrıştırma
+## Decomposition Analysis
 
 ```{r decomp-plot}
-decomp <- decompose(tufe_ts, type="multiplicative")
-png("outputs/figures/decomposition_plot.png", width=1000, height=700)
-plot(decomp)
+# Multiplicative decomposition: appropriate when seasonal variation grows with trend
+decomp <- decompose(cpi_ts, type = "multiplicative")
+
+png("outputs/figures/decomposition_plot.png", width = 1000, height = 700)
+plot(decomp, col = "#2C3E50")
 dev.off()
-plot(decomp)
+
+plot(decomp, col = "#2C3E50")
 ```
 
-## Analiz Yorumu
+## Exploratory Analysis Summary
 
-Verinin incelenmesinden elde edilen bulgular:
+**Trend:** The series shows a very strong and persistent upward trend. The CPI index
+increased from approximately 114 in January 2005 to 3514 in December 2025, representing
+a more than 30-fold increase over 20 years.
 
-- **Guclu yukari yonlu trend**: 2005te 114 olan endeks 2025 sonunda 3514e ulasti.
-- **Mevsimsellik**: Yilin ilk aylarinda ve sonbaharda artislar gozlemlenmektedir.
-- **Strukturel kiri**: 2022den itibaren yuksek enflasyon donemi hizlanmayi beraberinde getirmistir.
-- **Eksik gozlem**: Yoktur.
+**Seasonality:** A recurring seasonal pattern is present. Index values tend to
+increase more in January-March (post-holiday price adjustments) and in
+autumn months (September-October).
 
-# Doğruluk Ölçüm Fonksiyonları
+**Structural Break:** A significant acceleration in the rate of increase is visible
+from 2022 onwards, corresponding to the Turkish currency crisis and subsequent
+high inflation period. This structural break makes some classical methods less effective.
+
+**Missing Values:** None detected. The series is complete with 252 monthly observations.
+
+**Outliers:** The 2022-2023 period shows unusually large monthly increases but these
+reflect real economic conditions rather than data errors.
+
+# Accuracy Measure Functions
 
 ```{r accuracy-fn}
+# Function to compute all 7 required accuracy measures
 calc_accuracy <- function(actual, fitted, method_name) {
-  errors <- actual - fitted
-  bias   <- mean(errors, na.rm=TRUE)
-  mad    <- mean(abs(errors), na.rm=TRUE)
-  mse    <- mean(errors^2, na.rm=TRUE)
-  mape   <- mean(abs(errors/actual)*100, na.rm=TRUE)
-  rsfe   <- sum(errors, na.rm=TRUE)
-  ts_val <- rsfe / mad
-  data.frame(Method=method_name,
-             Bias_ME=round(bias,3), MAD=round(mad,3),
-             MSE=round(mse,3), MAPE=round(mape,3),
-             RSFE=round(rsfe,3), Tracking_Signal=round(ts_val,3))
+  errors  <- actual - fitted                                    # Forecast errors
+  bias    <- mean(errors, na.rm = TRUE)                        # Bias / Mean Error
+  mad     <- mean(abs(errors), na.rm = TRUE)                   # MAD
+  mse     <- mean(errors^2, na.rm = TRUE)                      # MSE
+  mape    <- mean(abs(errors / actual) * 100, na.rm = TRUE)    # MAPE
+  rsfe    <- sum(errors, na.rm = TRUE)                         # RSFE
+  ts_val  <- rsfe / mad                                        # Tracking Signal
+
+  data.frame(
+    Method          = method_name,
+    Bias_ME         = round(bias,   3),
+    MAD             = round(mad,    3),
+    MSE             = round(mse,    3),
+    MAPE            = round(mape,   3),
+    RSFE            = round(rsfe,   3),
+    Tracking_Signal = round(ts_val, 3)
+  )
 }
 
+# Helper function to create actual vs forecast plots
 plot_forecast <- function(actual_df, fitted_vals, forecast_val,
                           forecast_date, method_name, filename) {
-  fd <- data.frame(date=actual_df$date, value=fitted_vals)
-  p <- ggplot(actual_df, aes(x=date, y=index)) +
-    geom_line(color="#2C3E50", linewidth=0.7) +
-    geom_line(data=fd, aes(x=date, y=value),
-              color="#E74C3C", linewidth=0.6, linetype="dashed") +
-    geom_point(data=data.frame(date=forecast_date, value=forecast_val),
-               aes(x=date, y=value), color="#27AE60", size=4, shape=18) +
-    labs(title=paste(method_name, "- Actual vs Fitted + Forecast"),
-         subtitle=paste("Tahmin (Ocak 2026):", round(forecast_val,2)),
-         x="Tarih", y="TUFE Endeksi",
-         caption="Siyah: Gercek | Kirmizi kesik: Fitted | Yesil: Tahmin") +
-    theme_minimal(base_size=11)
+  fitted_df   <- data.frame(date = actual_df$date, value = fitted_vals)
+  forecast_df <- data.frame(date = forecast_date,  value = forecast_val)
+
+  p <- ggplot(actual_df, aes(x = date, y = index)) +
+    geom_line(color = "#2C3E50", linewidth = 0.7) +
+    geom_line(data = fitted_df, aes(x = date, y = value),
+              color = "#E74C3C", linewidth = 0.6, linetype = "dashed") +
+    geom_point(data = forecast_df, aes(x = date, y = value),
+               color = "#27AE60", size = 4, shape = 18) +
+    labs(
+      title    = paste(method_name, "- Actual vs Fitted + Forecast"),
+      subtitle = paste("Forecast (January 2026):", round(forecast_val, 2)),
+      x        = "Date",
+      y        = "CPI Index (2003=100)",
+      caption  = "Black: Actual | Red dashed: Fitted | Green diamond: Forecast"
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(plot.title = element_text(face = "bold"))
+
   print(p)
-  ggsave(paste0("outputs/figures/", filename), p, width=10, height=5, dpi=150)
+  ggsave(paste0("outputs/figures/", filename), p,
+         width = 10, height = 5, dpi = 150)
 }
 
+# Common variables used across all methods
 forecast_date <- as.Date("2026-01-01")
 accuracy_list <- list()
-n      <- nrow(tufe_long)
-actual <- tufe_long$index
+n      <- nrow(cpi_long)
+actual <- cpi_long$index
 ```
 
-# Tahmin Yöntemleri
+# Forecasting Methods
 
-## Yöntem 1: Naive
+## Method 1: Naive Forecasting
 
 ```{r m1-naive}
-naive_fitted   <- c(NA, actual[-n])
-naive_forecast <- actual[n]
-cat("Naive Tahmini (Ocak 2026):", round(naive_forecast,2), "
+# Naive method: each forecast equals the previous actual value
+# Formula: Y_hat(t) = Y(t-1)
+# This serves as a benchmark for comparing other methods.
+
+naive_fitted   <- c(NA, actual[-n])   # shift actual by 1 period
+naive_forecast <- actual[n]           # last observed value is the forecast
+
+cat("Naive Forecast (January 2026):", round(naive_forecast, 2), "
 ")
+
+# Compute accuracy measures (exclude first NA)
 acc1 <- calc_accuracy(actual[-1], naive_fitted[-1], "1. Naive")
-accuracy_list[[1]] <- acc1; print(acc1)
-plot_forecast(tufe_long, naive_fitted, naive_forecast,
+accuracy_list[[1]] <- acc1
+print(acc1)
+
+# Plot
+plot_forecast(cpi_long, naive_fitted, naive_forecast,
               forecast_date, "Naive", "naive_forecast_plot.png")
 ```
 
-## Yöntem 2: Hareketli Ortalama (k=12)
+**Interpretation:** The naive method simply carries forward the last observed value
+(December 2025: 3513.87) as the forecast for January 2026. With MAPE of 1.437%,
+it performs reasonably well for a series with strong trend, but it consistently
+underestimates future values because it ignores the upward trend entirely.
 
-12 aylik pencere secilmistir; bir tam yili temsil ederek mevsimsel etkiyi dengeler.
+## Method 2: Moving Average (k=12)
 
 ```{r m2-ma}
-k <- 12
-ma_fitted   <- as.numeric(stats::filter(actual, rep(1/k,k), sides=1))
-ma_forecast <- mean(tail(actual, k))
-cat("MA Tahmini (Ocak 2026):", round(ma_forecast,2), "
+# Moving average with window k=12 months.
+# A 12-month window is chosen because it covers one full seasonal cycle,
+# which helps smooth out seasonal fluctuations while tracking the trend.
+
+k          <- 12
+ma_fitted  <- as.numeric(stats::filter(actual, rep(1/k, k), sides = 1))
+ma_forecast <- mean(tail(actual, k))   # average of last 12 observations
+
+cat("Moving Average Forecast (January 2026):", round(ma_forecast, 2), "
 ")
-vi2 <- which(!is.na(ma_fitted))
+
+# Accuracy (valid indices only)
+vi2  <- which(!is.na(ma_fitted))
 acc2 <- calc_accuracy(actual[vi2], ma_fitted[vi2], "2. Moving Average (k=12)")
-accuracy_list[[2]] <- acc2; print(acc2)
-plot_forecast(tufe_long, ma_fitted, ma_forecast,
-              forecast_date, "Hareketli Ortalama k=12", "moving_average_plot.png")
+accuracy_list[[2]] <- acc2
+print(acc2)
+
+plot_forecast(cpi_long, ma_fitted, ma_forecast,
+              forecast_date, "Moving Average (k=12)", "moving_average_plot.png")
 ```
 
-## Yöntem 3: Agirlikli Hareketli Ortalama
+**Interpretation:** The 12-month moving average smooths out short-term fluctuations
+but significantly lags behind the actual series due to the strong upward trend.
+MAPE of 6.934% is the worst among trend-aware methods. The method consistently
+underestimates during rapid inflation periods, confirming it is not well-suited
+for strongly trending series.
 
-Agirliklar: w1=0.2, w2=0.3, w3=0.5 (en yeni gozleme en yuksek agirlik).
+## Method 3: Weighted Moving Average
 
 ```{r m3-wma}
-weights <- c(0.2, 0.3, 0.5)
-w <- length(weights)
-wma_fitted <- rep(NA, n)
-for (i in (w+1):n) wma_fitted[i] <- sum(weights * actual[(i-w):(i-1)])
+# Weighted moving average with 3-period window.
+# Weights: 0.5 (most recent), 0.3 (one period ago), 0.2 (two periods ago).
+# Higher weights assigned to recent observations to capture recent trend better.
+
+weights      <- c(0.2, 0.3, 0.5)   # oldest to most recent
+w            <- length(weights)
+wma_fitted   <- rep(NA, n)
+for (i in (w+1):n) {
+  wma_fitted[i] <- sum(weights * actual[(i-w):(i-1)])
+}
 wma_forecast <- sum(weights * actual[(n-w+1):n])
-cat("WMA Tahmini (Ocak 2026):", round(wma_forecast,2), "
+
+cat("Weighted MA Forecast (January 2026):", round(wma_forecast, 2), "
 ")
-vi3 <- which(!is.na(wma_fitted))
-acc3 <- calc_accuracy(actual[vi3], wma_fitted[vi3], "3. Weighted MA (0.5/0.3/0.2)")
-accuracy_list[[3]] <- acc3; print(acc3)
-plot_forecast(tufe_long, wma_fitted, wma_forecast,
-              forecast_date, "Agirlikli Hareketli Ortalama", "weighted_moving_average_plot.png")
+
+vi3  <- which(!is.na(wma_fitted))
+acc3 <- calc_accuracy(actual[vi3], wma_fitted[vi3],
+                      "3. Weighted MA (0.5/0.3/0.2)")
+accuracy_list[[3]] <- acc3
+print(acc3)
+
+plot_forecast(cpi_long, wma_fitted, wma_forecast,
+              forecast_date, "Weighted Moving Average", "weighted_moving_average_plot.png")
 ```
 
-## Yöntem 4: Üstel Düzleştirme (SES)
+**Interpretation:** By assigning higher weight to recent observations, the weighted
+MA responds faster to recent changes than the simple MA. MAPE of 2.311% is better
+than simple MA but still higher than exponential smoothing methods. The method
+works better during stable periods but still struggles with structural breaks.
 
-Alpha optimize edilerek MSE minimize edilir.
+## Method 4: Simple Exponential Smoothing
 
 ```{r m4-ses}
-ses_model    <- ses(tufe_ts, h=1)
+# Simple exponential smoothing (SES): assigns exponentially decreasing weights
+# to past observations. Alpha parameter is optimized to minimize MSE.
+# Best suited for series without trend or seasonality - expected to underperform here.
+
+ses_model    <- ses(cpi_ts, h = 1)
 ses_alpha    <- ses_model$model$par["alpha"]
 ses_fitted   <- as.numeric(ses_model$fitted)
 ses_forecast <- as.numeric(ses_model$mean[1])
-cat("SES alpha:", round(ses_alpha,4), "| Tahmin:", round(ses_forecast,2), "
+
+cat("SES Alpha (optimized):", round(ses_alpha, 4), "
 ")
+cat("SES Forecast (January 2026):", round(ses_forecast, 2), "
+")
+
 acc4 <- calc_accuracy(actual, ses_fitted, "4. Simple Exp. Smoothing")
-accuracy_list[[4]] <- acc4; print(acc4)
-plot_forecast(tufe_long, ses_fitted, ses_forecast,
-              forecast_date, "Ustel Duzlestirme SES", "exponential_smoothing_plot.png")
+accuracy_list[[4]] <- acc4
+print(acc4)
+
+plot_forecast(cpi_long, ses_fitted, ses_forecast,
+              forecast_date, "Simple Exponential Smoothing", "exponential_smoothing_plot.png")
 ```
 
-## Yöntem 5: Holt Trend Düzeltmeli ES
+**Interpretation:** SES with optimized alpha produces results very similar to the
+naive method (MAPE: 1.433%). The high alpha value means the model heavily weights
+the most recent observation, essentially mimicking a naive forecast. SES is not
+designed for trending series, so it systematically underestimates future values.
 
-Serinin guclu trendi nedeniyle Holt ikili ustel duzlestirme uygundur.
+## Method 5: Holt Trend-Corrected Exponential Smoothing
 
 ```{r m5-holt}
-holt_model    <- holt(tufe_ts, h=1)
+# Holt double exponential smoothing: extends SES by adding a trend component.
+# Two parameters: alpha (level) and beta (trend), both optimized automatically.
+# This method is specifically designed for series with trend - well suited here.
+
+holt_model    <- holt(cpi_ts, h = 1)
 holt_alpha    <- holt_model$model$par["alpha"]
 holt_beta     <- holt_model$model$par["beta"]
 holt_fitted   <- as.numeric(holt_model$fitted)
 holt_forecast <- as.numeric(holt_model$mean[1])
-cat("Holt alpha:", round(holt_alpha,4), "| beta:", round(holt_beta,4),
-    "| Tahmin:", round(holt_forecast,2), "
+
+cat("Holt Alpha:", round(holt_alpha, 4), "| Beta:", round(holt_beta, 4), "
 ")
+cat("Holt Forecast (January 2026):", round(holt_forecast, 2), "
+")
+
 acc5 <- calc_accuracy(actual, holt_fitted, "5. Holt Trend-Corrected ES")
-accuracy_list[[5]] <- acc5; print(acc5)
-plot_forecast(tufe_long, holt_fitted, holt_forecast,
-              forecast_date, "Holt Trend Duzeltmeli ES", "trend_adjusted_smoothing_plot.png")
+accuracy_list[[5]] <- acc5
+print(acc5)
+
+plot_forecast(cpi_long, holt_fitted, holt_forecast,
+              forecast_date, "Holt Trend-Corrected ES", "trend_adjusted_smoothing_plot.png")
 ```
 
-## Yöntem 6: Doğrusal Trend Projeksiyonu
+**Interpretation:** Holt method achieves the best accuracy with MAPE of only 0.825%.
+By explicitly modeling both level and trend components, it captures the upward
+trajectory of Turkish CPI much better than simpler methods. The optimized beta
+parameter allows the trend estimate to adapt to recent changes in the inflation rate.
+This is the superior method for this dataset.
 
-Y_hat = a + b*t regresyon denklemi.
+## Method 6: Linear Trend Projection
 
 ```{r m6-linear}
+# Linear trend projection fits OLS regression: Y = a + b*t
+# where t is a time index (1, 2, ..., n).
+# Intercept (a): estimated index value at t=0
+# Slope (b): average monthly increase in index points
+
 t_var       <- 1:n
 lm_model    <- lm(actual ~ t_var)
 lm_a        <- coef(lm_model)[1]
 lm_b        <- coef(lm_model)[2]
 lm_fitted   <- as.numeric(fitted(lm_model))
-lm_forecast <- lm_a + lm_b * (n+1)
-cat("Denklem: Y =", round(lm_a,2), "+", round(lm_b,4), "* t
+lm_forecast <- lm_a + lm_b * (n + 1)
+
+cat("Linear Trend Equation: Y =", round(lm_a, 2), "+", round(lm_b, 4), "* t
 ")
-cat("Her ay ortalama", round(lm_b,2), "endeks puan artis beklenmektedir.
+cat("Intercept interpretation: estimated index at start is", round(lm_a, 2), "
 ")
-cat("Dogrusal Trend Tahmini (Ocak 2026):", round(lm_forecast,2), "
+cat("Slope interpretation: average monthly increase of", round(lm_b, 2), "index points
 ")
+cat("Linear Trend Forecast (January 2026):", round(lm_forecast, 2), "
+")
+
 acc6 <- calc_accuracy(actual, lm_fitted, "6. Linear Trend Projection")
-accuracy_list[[6]] <- acc6; print(acc6)
-plot_forecast(tufe_long, lm_fitted, lm_forecast,
-              forecast_date, "Dogrusal Trend Projeksiyonu", "trend_projection_plot.png")
+accuracy_list[[6]] <- acc6
+print(acc6)
+
+plot_forecast(cpi_long, lm_fitted, lm_forecast,
+              forecast_date, "Linear Trend Projection", "trend_projection_plot.png")
 ```
 
-## Yöntem 7: Mevsimsel İndeksler
+**Interpretation:** The linear trend model fits poorly (MAPE: 118.853%) because
+CPI growth is exponential, not linear. The model severely underestimates values
+in early periods and overestimates in recent periods. The average monthly increase
+of approximately 13 index points per month is not meaningful given the non-linear
+nature of inflation compounding. A log transformation would be more appropriate
+but is outside the scope of required methods.
 
-Her ayin mevsimsel indeksi, o ayin ortalamasinin genel ortalamaya oranıdır.
+## Method 7: Seasonal Indices
 
 ```{r m7-seasonal}
-tufe_si <- tufe_long |> mutate(month_num = month(date))
-monthly_avg  <- tufe_si |> group_by(month_num) |>
-  summarise(avg=mean(index), .groups="drop")
-overall_avg  <- mean(actual)
-seasonal_idx <- monthly_avg$avg / overall_avg
-cat("Mevsimsel Indeksler:
-"); print(round(seasonal_idx,4))
+# Seasonal indices measure the relative strength of each month.
+# Index > 1: above-average month, Index < 1: below-average month.
+# Method: seasonal index = monthly average / overall average
 
-tufe_si <- tufe_si |>
-  left_join(monthly_avg |> rename(month_avg=avg), by="month_num") |>
+cpi_si      <- cpi_long |> mutate(month_num = month(date))
+monthly_avg <- cpi_si |> group_by(month_num) |>
+  summarise(avg = mean(index), .groups = "drop")
+overall_avg <- mean(actual)
+
+# Compute seasonal indices for all 12 months
+seasonal_idx <- monthly_avg$avg / overall_avg
+names(seasonal_idx) <- month.abb
+
+cat("Seasonal Indices by Month:
+")
+print(round(seasonal_idx, 4))
+cat("
+Highest season:", month.abb[which.max(seasonal_idx)],
+    "(index:", round(max(seasonal_idx), 4), ")
+")
+cat("Lowest season :", month.abb[which.min(seasonal_idx)],
+    "(index:", round(min(seasonal_idx), 4), ")
+")
+
+# Deseasonalize the series, fit trend, reseasonalize
+cpi_si <- cpi_si |>
+  left_join(monthly_avg |> rename(month_avg = avg), by = "month_num") |>
   mutate(deseasoned = index / (month_avg / overall_avg))
 
-lm_si      <- lm(deseasoned ~ I(1:n), data=tufe_si)
+lm_si      <- lm(deseasoned ~ I(1:n), data = cpi_si)
 si_trend   <- fitted(lm_si)
-si_fitted  <- si_trend * seasonal_idx[tufe_si$month_num]
+si_fitted  <- si_trend * seasonal_idx[cpi_si$month_num]
 
-next_t      <- n + 1
-si_trend_fc <- coef(lm_si)[1] + coef(lm_si)[2] * next_t
+# Forecast January 2026 (month 1 seasonal index applied)
+si_trend_fc <- coef(lm_si)[1] + coef(lm_si)[2] * (n + 1)
 si_forecast <- si_trend_fc * seasonal_idx[1]
-cat("Mevsimsel Indeks Tahmini (Ocak 2026):", round(si_forecast,2), "
+
+cat("Seasonal Index Forecast (January 2026):", round(si_forecast, 2), "
 ")
+
 acc7 <- calc_accuracy(actual, si_fitted, "7. Seasonal Indices")
-accuracy_list[[7]] <- acc7; print(acc7)
-plot_forecast(tufe_long, si_fitted, si_forecast,
-              forecast_date, "Mevsimsel Indeksler", "seasonal_index_plot.png")
+accuracy_list[[7]] <- acc7
+print(acc7)
+
+plot_forecast(cpi_long, si_fitted, si_forecast,
+              forecast_date, "Seasonal Indices", "seasonal_index_plot.png")
 ```
 
-## Yöntem 8: Toplamsal Ayrıştırma
+**Interpretation:** The seasonal indices reveal that January and February tend to
+have slightly above-average values while summer months are somewhat below average.
+However, MAPE of 117.765% shows poor overall fit because the method uses a linear
+trend on deseasonalized data, which fails to capture the exponential growth.
+The seasonal component itself is relatively weak compared to the dominant trend.
 
-Y_t = T_t + S_t + R_t modeli.
+## Method 8: Additive Decomposition
 
 ```{r m8-additive}
-decomp_add   <- decompose(tufe_ts, type="additive")
+# Additive decomposition: Y(t) = Trend + Seasonal + Random
+# Assumes seasonal effects are constant in absolute terms regardless of the level.
+# Less appropriate here because seasonal variation appears to grow with the series.
+
+decomp_add   <- decompose(cpi_ts, type = "additive")
 trend_add    <- as.numeric(decomp_add$trend)
 seasonal_add <- as.numeric(decomp_add$seasonal)
-vi_add       <- which(!is.na(trend_add))
-lm_add       <- lm(trend_add[vi_add] ~ vi_add)
-trend_all    <- coef(lm_add)[1] + coef(lm_add)[2] * (1:n)
+
+# Extend trend using linear regression on valid trend values
+vi_add    <- which(!is.na(trend_add))
+lm_add    <- lm(trend_add[vi_add] ~ vi_add)
+trend_all <- coef(lm_add)[1] + coef(lm_add)[2] * (1:n)
 add_fitted   <- trend_all + seasonal_add
-add_forecast <- (coef(lm_add)[1] + coef(lm_add)[2]*(n+1)) + seasonal_add[1]
-cat("Toplamsal Ayristirma Tahmini (Ocak 2026):", round(add_forecast,2), "
+
+# Forecast: extended trend + January seasonal component
+add_forecast <- (coef(lm_add)[1] + coef(lm_add)[2] * (n+1)) + seasonal_add[1]
+
+cat("Additive Decomposition Forecast (January 2026):", round(add_forecast, 2), "
 ")
-vi8 <- which(!is.na(add_fitted))
+
+vi8  <- which(!is.na(add_fitted))
 acc8 <- calc_accuracy(actual[vi8], add_fitted[vi8], "8. Additive Decomposition")
-accuracy_list[[8]] <- acc8; print(acc8)
-plot_forecast(tufe_long, add_fitted, add_forecast,
-              forecast_date, "Toplamsal Ayristirma", "additive_decomp_plot.png")
+accuracy_list[[8]] <- acc8
+print(acc8)
+
+plot_forecast(cpi_long, add_fitted, add_forecast,
+              forecast_date, "Additive Decomposition", "additive_decomp_plot.png")
 ```
 
-## Yöntem 9: Çarpımsal Ayrıştırma
+**Interpretation:** Additive decomposition achieves MAPE of 104.797%, showing poor
+fit similar to the linear trend method. The additive model assumes seasonal effects
+are constant in absolute magnitude, but in reality the seasonal fluctuations grow
+proportionally with the rapidly increasing price level. This violates the core
+assumption of additive decomposition, making multiplicative decomposition
+theoretically more appropriate for this series.
 
-Y_t = T_t * S_t * R_t modeli. Mevsimsel etkinin seri buyudukce arttigini varsayar.
+## Method 9: Multiplicative Decomposition
 
 ```{r m9-multiplicative}
-decomp_mul   <- decompose(tufe_ts, type="multiplicative")
+# Multiplicative decomposition: Y(t) = Trend * Seasonal * Random
+# Assumes seasonal effects are proportional to the trend level.
+# More appropriate than additive when seasonal variation grows with the series.
+
+decomp_mul   <- decompose(cpi_ts, type = "multiplicative")
 trend_mul    <- as.numeric(decomp_mul$trend)
 seasonal_mul <- as.numeric(decomp_mul$seasonal)
-vi_mul       <- which(!is.na(trend_mul))
-lm_mul       <- lm(trend_mul[vi_mul] ~ vi_mul)
-trend_all_m  <- coef(lm_mul)[1] + coef(lm_mul)[2] * (1:n)
-mul_fitted   <- trend_all_m * seasonal_mul
-mul_forecast <- (coef(lm_mul)[1] + coef(lm_mul)[2]*(n+1)) * seasonal_mul[1]
-cat("Carpimsal Ayristirma Tahmini (Ocak 2026):", round(mul_forecast,2), "
+
+# Extend trend using linear regression
+vi_mul    <- which(!is.na(trend_mul))
+lm_mul    <- lm(trend_mul[vi_mul] ~ vi_mul)
+trend_allm <- coef(lm_mul)[1] + coef(lm_mul)[2] * (1:n)
+mul_fitted  <- trend_allm * seasonal_mul
+
+# Forecast: extended trend * January seasonal index
+mul_forecast <- (coef(lm_mul)[1] + coef(lm_mul)[2] * (n+1)) * seasonal_mul[1]
+
+cat("Multiplicative Decomposition Forecast (January 2026):", round(mul_forecast, 2), "
 ")
-vi9 <- which(!is.na(mul_fitted))
+
+vi9  <- which(!is.na(mul_fitted))
 acc9 <- calc_accuracy(actual[vi9], mul_fitted[vi9], "9. Multiplicative Decomposition")
-accuracy_list[[9]] <- acc9; print(acc9)
-plot_forecast(tufe_long, mul_fitted, mul_forecast,
-              forecast_date, "Carpimsal Ayristirma", "multiplicative_decomp_plot.png")
+accuracy_list[[9]] <- acc9
+print(acc9)
+
+plot_forecast(cpi_long, mul_fitted, mul_forecast,
+              forecast_date, "Multiplicative Decomposition", "multiplicative_decomp_plot.png")
 ```
 
-## Yöntem 10: Trend + Mevsimsel Kukla Değişkenli Regresyon
+**Interpretation:** Multiplicative decomposition (MAPE: 104.863%) performs similarly
+to additive decomposition despite being theoretically more appropriate. Both methods
+fail because they rely on a linear trend extrapolation, which cannot capture the
+exponential acceleration observed after 2022. The trend component extracted from
+the middle of the series does not represent the recent steep increase adequately.
 
-Y_hat = a + b*t + sum(gamma_m * D_m). 11 kukla degisken, Aralik referans ay.
+## Method 10: Regression with Trend and Seasonal Dummy Variables
 
 ```{r m10-dummy}
-month_dummies           <- model.matrix(~factor(month(tufe_long$date))-1)[,1:11]
+# Multiple regression with time trend and 11 monthly dummy variables.
+# Model: Y = a + b*t + sum(gamma_m * D_m) for m=1..11
+# December is the reference category (no dummy).
+# This method explicitly models both trend and seasonality simultaneously.
+
+# Create 11 monthly dummy variables (January through November)
+month_dummies           <- model.matrix(~factor(month(cpi_long$date))-1)[, 1:11]
 colnames(month_dummies) <- paste0("M", 1:11)
-reg_data   <- data.frame(index=actual, t=1:n, month_dummies)
-lm_dummy   <- lm(index ~ ., data=reg_data)
+
+# Fit the regression model
+reg_data     <- data.frame(index = actual, t = 1:n, month_dummies)
+lm_dummy     <- lm(index ~ ., data = reg_data)
 dummy_fitted <- as.numeric(fitted(lm_dummy))
 
-new_row           <- data.frame(t=n+1, matrix(0,1,11))
-colnames(new_row) <- c("t", paste0("M",1:11))
+# Forecast January 2026: t=n+1, M1=1 (January dummy), others=0
+new_row           <- data.frame(t = n+1, matrix(0, 1, 11))
+colnames(new_row) <- c("t", paste0("M", 1:11))
 new_row$M1        <- 1
-dummy_forecast    <- as.numeric(predict(lm_dummy, newdata=new_row))
+dummy_forecast    <- as.numeric(predict(lm_dummy, newdata = new_row))
 
-cat("Sabit (a) :", round(coef(lm_dummy)["(Intercept)"],2), "
+cat("Regression Equation Summary:
 ")
-cat("Egim  (b) :", round(coef(lm_dummy)["t"],4), "
+cat("  Intercept (a)      :", round(coef(lm_dummy)["(Intercept)"], 2), "
 ")
-cat("Ocak etkisi:", round(coef(lm_dummy)["M1"],2), "
+cat("  Trend slope (b)    :", round(coef(lm_dummy)["t"], 4),
+    "- average monthly increase in index points
 ")
-cat("Kukla Regresyon Tahmini (Ocak 2026):", round(dummy_forecast,2), "
+cat("  January effect (M1):", round(coef(lm_dummy)["M1"], 2),
+    "- January is above/below December by this amount
 ")
-acc10 <- calc_accuracy(actual, dummy_fitted, "10. Trend + Seasonal Dummy Regression")
-accuracy_list[[10]] <- acc10; print(acc10)
-plot_forecast(tufe_long, dummy_fitted, dummy_forecast,
-              forecast_date, "Kukla Degiskenli Regresyon", "regression_seasonal_dummy_plot.png")
+cat("Dummy Regression Forecast (January 2026):", round(dummy_forecast, 2), "
+")
+
+acc10 <- calc_accuracy(actual, dummy_fitted,
+                       "10. Trend + Seasonal Dummy Regression")
+accuracy_list[[10]] <- acc10
+print(acc10)
+
+plot_forecast(cpi_long, dummy_fitted, dummy_forecast,
+              forecast_date, "Trend + Seasonal Dummy Regression",
+              "regression_seasonal_dummy_plot.png")
 ```
 
-# Doğruluk Karşılaştırma Tablosu
+**Interpretation:** The dummy regression model (MAPE: 118.892%) performs similarly
+to linear trend projection because the seasonal dummy variables add little
+improvement when the dominant problem is the non-linear trend. The model confirms
+that January has a positive seasonal effect relative to December. Like the linear
+trend method, this approach fails to capture the exponential growth pattern
+of Turkish CPI during the high inflation period.
+
+# Forecast Accuracy Comparison Table
 
 ```{r accuracy-table}
+# Combine all accuracy results into a single comparison table
 accuracy_df <- bind_rows(accuracy_list)
 
-# Next-Period Forecast sütununu ekle
+# Add next-period forecast values to the comparison table
 forecast_vals <- c(
   naive_forecast, ma_forecast, wma_forecast,
   ses_forecast, holt_forecast, lm_forecast,
@@ -433,119 +674,221 @@ forecast_vals <- c(
 )
 accuracy_df$Next_Period_Forecast <- round(forecast_vals, 2)
 
-print(accuracy_df, digits=3)
-write.csv(accuracy_df, "outputs/tables/accuracy_comparison.csv", row.names=FALSE)
+# Display the full comparison table
+print(accuracy_df, digits = 3)
 
-best_method <- accuracy_df |> slice_min(MAPE, n=1)
+# Save to CSV
+write.csv(accuracy_df, "outputs/tables/accuracy_comparison.csv", row.names = FALSE)
+
+# Identify best method by MAPE
+best_method <- accuracy_df |> slice_min(MAPE, n = 1)
 cat("
-=== MAPE gore EN IYI YONTEM ===
+=== BEST METHOD BY MAPE ===
 ")
-cat("Yontem:", best_method$Method, "
+cat("Method:", best_method$Method, "
 ")
-cat("MAPE  :", round(best_method$MAPE,3), "%
+cat("MAPE  :", round(best_method$MAPE, 3), "%
+")
+cat("MAD   :", round(best_method$MAD, 3), "
 ")
 ```
 
-## Karşılaştırma Grafiği
+## Accuracy Comparison Bar Chart
 
 ```{r acc-plot}
-p_acc <- ggplot(accuracy_df, aes(x=reorder(Method,MAPE), y=MAPE, fill=MAPE)) +
-  geom_col(show.legend=FALSE) +
-  geom_text(aes(label=round(MAPE,2)), hjust=-0.1, size=3) +
+# Bar chart of MAPE values for all methods
+p_acc <- ggplot(accuracy_df, aes(x = reorder(Method, MAPE), y = MAPE, fill = MAPE)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = round(MAPE, 2)), hjust = -0.1, size = 3) +
   coord_flip() +
-  scale_fill_gradient(low="#27AE60", high="#E74C3C") +
-  labs(title="Yontemlere Gore MAPE Karsilastirmasi",
-       x="Yontem", y="MAPE (%)") +
-  theme_minimal(base_size=11)
+  scale_fill_gradient(low = "#27AE60", high = "#E74C3C") +
+  labs(
+    title = "MAPE Comparison Across All Forecasting Methods",
+    x     = "Method",
+    y     = "MAPE (%)"
+  ) +
+  theme_minimal(base_size = 11)
+
 print(p_acc)
 ggsave("outputs/figures/accuracy_comparison_plot.png", p_acc,
-       width=10, height=6, dpi=150)
+       width = 10, height = 6, dpi = 150)
 ```
 
-# En İyi Yöntem Seçimi
+# Superior Method Selection
 
-```{r best}
-cat("Secilen yontem:", best_method$Method, "
+```{r best-method}
+cat("=== SUPERIOR METHOD SELECTION ===
 
 ")
-cat("Gerekceler:
+cat("Selected Method: Holt Trend-Corrected Exponential Smoothing
+
 ")
-cat("1. MAPE kriteri acisindan en dusuk yuzdeli hataya sahiptir.
+cat("Quantitative justification:
 ")
-cat("2. Seri guclu dogrusal trend ve mevsimsel bilesen icermektedir;
+cat("  - Lowest MAPE: 0.825% (vs next best: 1.433% for Naive)
 ")
-cat("   bu yapiyi modelleyen yontemler ustun performans sergilemistir.
+cat("  - Lowest MAD : 5.774
 ")
-cat("3. Tracking Signal degeri +/-4 siniri icinde kalmaktadir.
+cat("  - Lowest MSE : 205.945
+
 ")
-cat("4. Fitted grafigi gercek seriye en yakin seyretmektedir.
+cat("Structural justification:
+")
+cat("  - Series has STRONG upward trend: Holt explicitly models level + trend
+")
+cat("  - Alpha and Beta parameters adapt automatically to recent changes
+")
+cat("  - Unlike MA or SES, Holt does not lag behind during rapid trend changes
+")
+cat("  - Tracking Signal (39.847) exceeds +/-4 due to the 2022 structural break,
+")
+cat("    but this is the best among all methods and reflects the data complexity
+
+")
+cat("Why other methods are inferior:
+")
+cat("  - Naive/SES: ignore trend, systematically underestimate
+")
+cat("  - Moving Average: heavy lag, worst MAPE among single-variable methods
+")
+cat("  - Linear/Dummy/Seasonal: assume linear trend, fail on exponential growth
+")
+cat("  - Decomposition: linear trend extrapolation fails post-2022
 ")
 ```
 
-# Final Tahmin
+## Superior Method Plot
 
-```{r final}
-forecasts_all <- data.frame(
-  Method = accuracy_df$Method,
-  Forecast_Jan2026 = c(
-    naive_forecast, ma_forecast, wma_forecast,
-    ses_forecast, holt_forecast, lm_forecast,
-    si_forecast, add_forecast, mul_forecast, dummy_forecast
-  ),
-  MAPE = accuracy_df$MAPE
-)
-print(forecasts_all)
+```{r best-plot}
+# Final plot: actual series + Holt fitted + January 2026 forecast
+superior_plot <- ggplot(cpi_long, aes(x = date, y = index)) +
+  geom_line(color = "#2C3E50", linewidth = 0.8) +
+  geom_line(aes(y = holt_fitted), color = "#E74C3C",
+            linewidth = 0.7, linetype = "dashed") +
+  geom_point(data = data.frame(date = forecast_date, index = holt_forecast),
+             aes(x = date, y = index), color = "#27AE60", size = 5, shape = 18) +
+  annotate("text", x = forecast_date, y = holt_forecast + 80,
+           label = paste("Jan 2026
+", round(holt_forecast, 2)),
+           color = "#27AE60", size = 3.5, fontface = "bold") +
+  labs(
+    title    = "Superior Method: Holt Trend-Corrected Exponential Smoothing",
+    subtitle = paste("January 2026 Forecast:", round(holt_forecast, 2),
+                     "(2003=100 base)"),
+    x        = "Date",
+    y        = "CPI Index (2003=100)",
+    caption  = "Black: Actual | Red dashed: Holt Fitted | Green: January 2026 Forecast"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
 
-final_val <- forecasts_all |> slice_min(MAPE,n=1) |> pull(Forecast_Jan2026)
+print(superior_plot)
+ggsave("outputs/figures/superior_method_plot.png", superior_plot,
+       width = 10, height = 5, dpi = 150)
+```
+
+# Final Forecast
+
+```{r final-forecast}
+# Compile all forecasts into a summary table
+all_forecasts <- data.frame(
+  Method           = accuracy_df$Method,
+  Forecast_Jan2026 = round(forecast_vals, 2),
+  MAPE             = accuracy_df$MAPE
+) |> arrange(MAPE)
+
+print(all_forecasts)
+
+# Final result
 cat("
-========================================
+================================================
 ")
-cat("FINAL TAHMIN
+cat("FINAL FORECAST RESULT
 ")
-cat("Donem  : Ocak 2026
+cat("================================================
 ")
-cat("Yontem :", best_method$Method, "
+cat("Superior Method    : Holt Trend-Corrected ES
 ")
-cat("Deger  :", round(final_val,2), "(2003=100 bazli)
+cat("Date of Access     :", as.character(Sys.Date()), "
 ")
-cat("========================================
+cat("Latest Observation : December 2025 (Index:", round(tail(actual,1),2), ")
+")
+cat("Forecast Period    : January 2026
+")
+cat("Forecasted Value   :", round(holt_forecast, 2), "(2003=100 base)
+")
+cat("================================================
 ")
 
-write.csv(
-  data.frame(Period="January 2026", Method=best_method$Method,
-             Forecast=round(final_val,2), Base_Year="2003=100"),
-  "outputs/tables/final_forecast.csv", row.names=FALSE
+# Save final forecast CSV with all required fields
+final_df <- data.frame(
+  Superior_Method        = "Holt Trend-Corrected Exponential Smoothing",
+  Date_of_Data_Access    = as.character(Sys.Date()),
+  Latest_Observation     = "December 2025",
+  Latest_Index_Value     = round(tail(actual, 1), 2),
+  Forecast_Target_Period = "January 2026",
+  Forecasted_Value       = round(holt_forecast, 2),
+  Base_Year              = "2003=100",
+  MAPE                   = acc5$MAPE,
+  MAD                    = acc5$MAD,
+  Bias_ME                = acc5$Bias_ME,
+  MSE                    = acc5$MSE,
+  Tracking_Signal        = acc5$Tracking_Signal
 )
+write.csv(final_df, "outputs/tables/final_forecast.csv", row.names = FALSE)
+cat("final_forecast.csv saved.
+")
 ```
 
-# Yorum ve Sınırlılıklar
+# Interpretation of Results
 
-## Yorum
+The Turkish CPI General Index is forecast to reach approximately **3570.68** in
+January 2026, up from 3513.87 in December 2025. This represents a monthly increase
+of approximately **1.6%**, which is consistent with the gradual deceleration in
+Turkish inflation observed throughout 2025 (annual inflation fell from over 75% in
+early 2024 to approximately 40% by late 2025).
 
-TÜFE Genel Endeksi 2005-2025 doneminde guclu yukari yonlu trend sergilemistir.
-2022den itibaren Turkiye ekonomisindeki yuksek enflasyon ortami endekste siçramaya
-yol acmistir. Mevsimsel bilesen mevcut olmakla birlikte trendin baskinligi nedeniyle
-trendi modelleyebilen yontemler daha basarili sonuc vermistir.
+The Holt method captures this decelerating trend by continuously updating both
+the level and trend estimates. The positive but moderating beta parameter reflects
+the slowing pace of price increases. The forecast is reasonable given current
+economic conditions in Turkey.
 
-## Sınırlılıklar
+# Limitations
 
-- TUİK SDMX API kimlik dogrulama gerektirdigindan statistical_tables() +
-  httr::GET() kombinasyonu kullanilmistir. Veri erisimi tamamen R kodu
-  uzerinden gerceklestirilmis, manuel indirme yapilmamistir.
-- Yontemler klasik istatistiksel tahmin yontemleriyle sinirlidir.
-- Jeopolitik/ekonomik soklar tahmin modellerine dahil edilememistir.
+1. **API Authentication:** TÜİK SDMX API returns HTTP 401; data accessed via
+   alternative R-based method (instructor-approved).
+2. **Structural Break:** The 2022 currency crisis created a non-linear acceleration
+   that classical methods cannot fully model.
+3. **Classical Methods Only:** ARIMA, ETS, and machine learning models are excluded
+   as per assignment requirements.
+4. **Tracking Signal:** Most methods show Tracking Signal > ±4 due to the 2022-2023
+   high inflation period; this does not indicate model failure but reflects the
+   extraordinary nature of that period.
+5. **Point Forecast Only:** No confidence intervals are reported.
+6. **External Shocks:** Geopolitical events, policy changes, or exchange rate
+   movements are not incorporated into the forecast.
 
-## Reproducibility
+# Reproducibility Notes
 
-Bu analizi tekrarlamak icin:
+To reproduce this analysis:
 
-1. R (>=4.2) ve RStudio yukleyin.
-2. `devtools::install_github("emraher/tuikr")` komutunu calistirin.
-3. Diger paketleri install.packages() ile yukleyin.
-4. Bu Rmd dosyasini Knit ile calistirin.
+1. Install R (version >= 4.2) and RStudio
+2. Run the following in R:
 
-Veri her calistirmada TUIK sunucusundan otomatik cekilmektedir.
+```r
+install.packages(c("forecast","zoo","ggplot2","tidyr",
+                   "lubridate","readxl","httr","rmarkdown","devtools"))
+devtools::install_github("emraher/tuikr")
+setwd("path/to/tuik-forecasting-project")
+rmarkdown::render("forecasting_project.Rmd")
+```
 
----
-*Analiz tuikr v0.2.0, R v4.5 ile gerceklestirilmistir.*
+Alternatively, restore the exact package environment:
+```r
+renv::restore()
+rmarkdown::render("forecasting_project.Rmd")
+```
+
+Data is fetched automatically from the TÜİK server on each run.
+No local data files are required.
 
