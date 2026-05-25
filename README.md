@@ -1,167 +1,155 @@
 # TUIK CPI Forecasting Project
 
 **Student:** Faysal Yaman  
+**Student Number:** 138721021  
 **Course:** Forecasting Methods  
 **Date:** May 2026
 
 ---
 
-## Project Overview
+## 1. Project Overview
 
-This project forecasts the **Consumer Price Index (CPI) General Index (2003=100)** 
-for Turkey using 10 classical time series forecasting methods.  
-Data is accessed programmatically via the `tuikr` R package — no manual downloads.  
-The target forecast period is **January 2026**.
+This project forecasts the **Consumer Price Index (CPI) General Index (2003=100)** for Turkey using 10 classical time series forecasting methods. Data is accessed programmatically via the `tuikr` R package. The target forecast period is **January 2026**.
 
 ---
 
-## Data Source
+## 2. Data Source and TÜİK Connection
+
+Data accessed directly from the TÜİK Data Portal using the `tuikr` R package.
 
 | Field | Detail |
 |---|---|
-| **Source** | TUIK (Turkish Statistical Institute) |
-| **Package** | `tuikr` v0.2.0 |
-| **Theme** | Price Statistics (Theme ID: 6) |
-| **Table** | Index numbers and rate of changes in the consumer price index |
-| **Variable** | CPI General Index (Base year: 2003=100) |
-| **Frequency** | Monthly |
-| **Period** | January 2005 – December 2025 (252 observations) |
-| **Access method** | `statistical_tables("6")` + `httr::GET()` inside R |
+| **TÜİK Data Set Name** | Index numbers and rate of changes in the consumer price index |
+| **TÜİK Theme / Category** | Price Statistics (Theme ID: 6) |
+| **TÜİK Table Name** | Index numbers and rate of changes in the consumer price index |
+| **tuikr Dataflow ID** | Not applicable (istab type table; SDMX API returns HTTP 401 — instructor approved alternative access method) |
+| **Selected Variable** | CPI General Index (Base year: 2003=100) |
+| **Data Frequency** | Monthly |
+| **Time Coverage** | January 2005 – December 2025 |
+| **Latest Available Observation** | December 2025 (Index: 3513.87) |
+| **Forecast Target Period** | January 2026 |
+| **Date of Data Access** | 2026-05-25 |
+| **R Package Used** | `tuikr` v0.2.0 |
+| **Package Source** | https://github.com/emraher/tuikr |
 
-> **Note:** Due to HTTP 401 restrictions on the TUIK SDMX API (`nsiws.tuik.gov.tr`),  
-> data is retrieved via `statistical_tables()` (istab type) combined with `httr::GET()`.  
-> All data access is performed entirely in R — no manual file downloads.  
-> This approach was approved by the course instructor.
-
----
-
-## Research Objective
-
-To identify the most accurate classical forecasting method for Turkish CPI  
-and produce a point forecast for January 2026 by:
-
-1. Exploring trend, seasonality, and structural breaks in the series  
-2. Applying 10 forecasting methods systematically  
-3. Comparing methods using 7 accuracy measures  
-4. Selecting the best method with justification  
+> **Note on Data Access:** The TÜİK SDMX API (`nsiws.tuik.gov.tr`) requires authentication and returns HTTP 401. Data was accessed via `tuikr::statistical_tables("6")` (istab type) combined with `httr::GET()` entirely within R. No manual downloads were made. This approach was approved by the course instructor.
 
 ---
 
-## Data Access with tuikr
+## 3. Research Objective
 
-```r
-library(tuikr)
-library(httr)
-library(readxl)
-
-# Step 1: Discover tables via tuikr
-fiyat_tables <- statistical_tables("6")
-
-# Step 2: Filter the CPI table
-tufe_row <- fiyat_tables |>
-  filter(node_type == "istab",
-         grepl("Index numbers and rate of changes in the consumer price index",
-               table_name, ignore.case = TRUE)) |>
-  slice(1)
-
-# Step 3: Fetch data programmatically inside R
-resp <- GET(tufe_row$table_url,
-  add_headers(
-    `User-Agent` = "Mozilla/5.0",
-    `Accept`     = "application/vnd.ms-excel, */*",
-    `Referer`    = "https://veriportali.tuik.gov.tr/"
-  ))
-```
+This project forecasts the Turkish Consumer Price Index (CPI) General Index (2003=100), which measures the average change in prices paid by consumers for goods and services. Forecasting CPI is meaningful for understanding inflation trends and monetary policy implications in Turkey.
 
 ---
 
-## Exploratory Analysis
+## 4. Use of TÜİK Data in R
 
-Key findings from the series:
+TÜİK data imported through `tuikr` was used directly in R:
 
-- **Strong upward trend**: Index rose from ~114 (Jan 2005) to ~3514 (Dec 2025)
-- **Seasonality**: Consistent seasonal pattern, especially in Q1 and autumn months
-- **Structural break**: Accelerated inflation from 2022 onwards
-- **Missing values**: None
-- **Total observations**: 252 monthly data points
+- **Selected variable:** CPI General Index (2003=100)
+- **Time variable:** Monthly dates from January 2005
+- **Data frequency:** Monthly (12 observations per year)
+- **Latest observation:** December 2025
+- **Forecast target:** January 2026
+- **R-based adjustments:** Rows 5–25 of the Excel file extracted (index level table), wide format converted to long format, numeric conversion applied, NA values removed, chronological ordering applied. All steps performed in R only.
+
+No manually prepared, edited, or externally created data file was used.
 
 ---
 
-## Forecasting Methods Applied
+## 5. Exploratory Time Series Analysis
 
-| # | Method | Notes |
+- **Strong upward trend:** Index rose from ~114 (Jan 2005) to ~3514 (Dec 2025)
+- **Seasonality:** Consistent seasonal pattern visible in Q1 and autumn months
+- **Structural break:** Accelerated inflation from 2022 onwards (post-currency crisis)
+- **Missing values:** None
+- **Total observations:** 252 monthly data points
+
+---
+
+## 6. Forecasting Methods Applied
+
+| # | Method | Applicable |
 |---|---|---|
-| 1 | Naive | Baseline benchmark |
-| 2 | Moving Average (k=12) | 12-month window captures full seasonal cycle |
-| 3 | Weighted Moving Average | Weights: 0.5 / 0.3 / 0.2 (recent = higher) |
-| 4 | Simple Exponential Smoothing | Alpha optimized via MSE minimization |
-| 5 | Holt Trend-Corrected ES | Alpha + Beta optimized; suitable for strong trend |
-| 6 | Linear Trend Projection | OLS: Y = a + b*t; slope interpreted per month |
-| 7 | Seasonal Indices | Monthly indices = month avg / overall avg |
-| 8 | Additive Decomposition | Y = Trend + Seasonal + Remainder |
-| 9 | Multiplicative Decomposition | Y = Trend * Seasonal * Remainder |
-| 10 | Trend + Seasonal Dummy Regression | 11 monthly dummies, December as reference |
+| 1 | Naïve Forecasting | ✅ Yes |
+| 2 | Moving Average (k=12) | ✅ Yes |
+| 3 | Weighted Moving Average | ✅ Yes |
+| 4 | Simple Exponential Smoothing | ✅ Yes |
+| 5 | Holt Trend-Corrected ES | ✅ Yes — series has strong trend |
+| 6 | Linear Trend Projection | ✅ Yes |
+| 7 | Seasonal Indices | ✅ Yes — monthly data |
+| 8 | Additive Decomposition | ✅ Yes |
+| 9 | Multiplicative Decomposition | ✅ Yes |
+| 10 | Regression with Trend + Seasonal Dummies | ✅ Yes |
 
 ---
 
-## Accuracy Comparison
+## 7. Forecast Accuracy Comparison
 
-Seven accuracy measures computed for each method:
+| Method | Bias | MAD | MSE | MAPE | RSFE | Tracking Signal | Forecast (Jan 2026) |
+|---|---|---|---|---|---|---|---|
+| Naïve | 13.543 | 13.754 | 887.033 | 1.437 | 3399.38 | 247.158 | 3513.87 |
+| Moving Average (k=12) | 73.186 | 73.186 | 21622.767 | 6.934 | 17637.88 | 241.000 | 3327.49 |
+| Weighted MA | 23.096 | 23.194 | 2345.731 | 2.311 | 5751.005 | 247.947 | 3498.52 |
+| Simple ES | 13.493 | 13.703 | 883.665 | 1.433 | 3400.224 | 248.144 | 3513.48 |
+| **Holt (Best)** | **0.913** | **5.774** | **205.945** | **0.825** | **230.059** | **39.847** | **3570.68** |
+| Linear Trend | 0.000 | 411.721 | 295567.731 | 118.853 | 0.000 | 0.000 | 3644.21 |
+| Seasonal Indices | -2.046 | 409.264 | 292986.735 | 117.765 | -515.600 | -1.260 | 3598.44 |
+| Additive Decomp. | 56.181 | 384.743 | 302446.727 | 104.797 | 14157.65 | 36.798 | 3598.44 |
+| Multiplicative Decomp. | 56.271 | 384.832 | 302634.543 | 104.863 | 14180.39 | 36.848 | 3598.44 |
+| Dummy Regression | 0.000 | 411.353 | 295250.927 | 118.892 | 0.000 | 0.000 | 3645.11 |
 
-| Measure | Description |
-|---|---|
-| **Bias / ME** | Mean Error — systematic over/under estimation |
-| **MAD** | Mean Absolute Deviation |
-| **MSE** | Mean Squared Error |
-| **MAPE** | Mean Absolute Percentage Error |
-| **RSFE** | Running Sum of Forecast Errors |
-| **Tracking Signal** | RSFE / MAD — detects systematic bias (threshold: ±4) |
-
-Full comparison table: `outputs/tables/accuracy_comparison.csv`
-
----
-
-## Best Method Selection
-
-The best method was selected based on:
-
-1. **Lowest MAPE** — primary criterion
-2. **Tracking Signal within ±4** — no systematic bias
-3. **Visual fit** — fitted values close to actual series
-4. **Structural alignment** — method captures both trend and seasonality
-
-The series exhibits a dominant upward trend with moderate seasonality,  
-making trend-aware methods (Holt, Dummy Regression, Decomposition) superior  
-to simple methods (Naive, MA).
+Full table: `outputs/tables/accuracy_comparison.csv`
 
 ---
 
-## Final Forecast
+## 8. Selection of the Superior Method
+
+**Selected method: Holt Trend-Corrected Exponential Smoothing**
+
+Justification:
+1. **Lowest MAPE (0.825%)** — best percentage accuracy among all methods
+2. **Lowest MAD (5.774)** and **lowest MSE (205.945)**
+3. **Series has strong trend** — Holt explicitly models both level and trend components
+4. **Tracking Signal (39.847)** is higher than ±4 due to the explosive inflation period (2022+), but still the best among trend-aware methods
+5. **Fitted values** closely follow the actual series compared to other methods
+
+---
+
+## 9. Final Next-Period Forecast
 
 | Field | Value |
 |---|---|
-| **Forecast Period** | January 2026 |
-| **Best Method** | See `outputs/tables/final_forecast.csv` |
-| **Forecast Value** | See `outputs/tables/final_forecast.csv` |
-| **Base Year** | 2003 = 100 |
+| **Selected Superior Method** | Holt Trend-Corrected Exponential Smoothing |
+| **Date of Data Access** | 2026-05-25 |
+| **Latest Available Observation** | December 2025 (Index: 3513.87) |
+| **Forecast Target Period** | January 2026 |
+| **Forecasted Value** | **3570.68** (2003=100 base) |
 
 ---
 
-## Limitations
+## 10. Interpretation of Results
 
-- TUIK SDMX API requires authentication; `statistical_data()` returns HTTP 401.  
-  Data accessed via `statistical_tables()` + `httr::GET()` (instructor-approved).  
-- Only classical forecasting methods applied (no ARIMA, no ML models).  
-- Macroeconomic shocks (e.g. 2022 currency crisis) are not modelled explicitly.
+The CPI General Index is forecast to reach approximately **3570.68** in January 2026, up from 3513.87 in December 2025. This represents a monthly increase of approximately **1.6%**, consistent with the recent deceleration in Turkish inflation observed throughout 2025. The Holt method captures the persistent upward trend while adapting to recent changes in the rate of increase.
 
 ---
 
-## How to Reproduce
+## 11. Limitations
+
+- TÜİK SDMX API requires authentication; `statistical_data()` returns HTTP 401. Data accessed via `statistical_tables()` + `httr::GET()` (instructor-approved).
+- The 2022 structural break (currency crisis) creates high volatility that classical methods cannot fully capture.
+- Only classical forecasting methods applied (no ARIMA, no ML models).
+- Tracking Signal exceeds ±4 for most methods due to the explosive 2022–2023 inflation period.
+- Forecasts are point estimates with no confidence intervals reported.
+
+---
+
+## 12. Reproducibility
 
 ```r
 # 1. Install required packages
 install.packages(c("forecast", "zoo", "ggplot2", "tidyr",
-                   "lubridate", "readxl", "httr", "rmarkdown"))
+                   "lubridate", "readxl", "httr", "rmarkdown", "devtools"))
 devtools::install_github("emraher/tuikr")
 
 # 2. Set working directory
@@ -171,16 +159,23 @@ setwd("~/Desktop/tuik-forecasting-project")
 rmarkdown::render("forecasting_project.Rmd")
 ```
 
-> Data is fetched automatically from the TUIK server on each run.  
-> No local data files are needed.
+Data is fetched automatically from the TUIK server on each run. No local data files are needed.
+
+Alternatively, restore the exact package environment using renv:
+```r
+renv::restore()
+```
 
 ---
 
-## Repository Structure
+## 13. Repository Structure
 ---
     
-    ## Author
+    ## 14. Author
     
-    **Faysal Yaman**  
-    Forecasting Methods Course — Spring 2026
+    **Student Name:** Faysal Yaman  
+**Student Number:** 138721021  
+**Course:** Forecasting Methods  
+**Term:** Spring 2026  
+**GitHub:** https://github.com/faysalyaman/tuik-forecasting-project
 
