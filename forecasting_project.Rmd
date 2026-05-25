@@ -233,7 +233,7 @@ vi2 <- which(!is.na(ma_fitted))
 acc2 <- calc_accuracy(actual[vi2], ma_fitted[vi2], "2. Moving Average (k=12)")
 accuracy_list[[2]] <- acc2; print(acc2)
 plot_forecast(tufe_long, ma_fitted, ma_forecast,
-              forecast_date, "Hareketli Ortalama k=12", "ma_forecast_plot.png")
+              forecast_date, "Hareketli Ortalama k=12", "moving_average_plot.png")
 ```
 
 ## Yöntem 3: Agirlikli Hareketli Ortalama
@@ -252,7 +252,7 @@ vi3 <- which(!is.na(wma_fitted))
 acc3 <- calc_accuracy(actual[vi3], wma_fitted[vi3], "3. Weighted MA (0.5/0.3/0.2)")
 accuracy_list[[3]] <- acc3; print(acc3)
 plot_forecast(tufe_long, wma_fitted, wma_forecast,
-              forecast_date, "Agirlikli Hareketli Ortalama", "wma_forecast_plot.png")
+              forecast_date, "Agirlikli Hareketli Ortalama", "weighted_moving_average_plot.png")
 ```
 
 ## Yöntem 4: Üstel Düzleştirme (SES)
@@ -269,7 +269,7 @@ cat("SES alpha:", round(ses_alpha,4), "| Tahmin:", round(ses_forecast,2), "
 acc4 <- calc_accuracy(actual, ses_fitted, "4. Simple Exp. Smoothing")
 accuracy_list[[4]] <- acc4; print(acc4)
 plot_forecast(tufe_long, ses_fitted, ses_forecast,
-              forecast_date, "Ustel Duzlestirme SES", "ses_forecast_plot.png")
+              forecast_date, "Ustel Duzlestirme SES", "exponential_smoothing_plot.png")
 ```
 
 ## Yöntem 5: Holt Trend Düzeltmeli ES
@@ -288,7 +288,7 @@ cat("Holt alpha:", round(holt_alpha,4), "| beta:", round(holt_beta,4),
 acc5 <- calc_accuracy(actual, holt_fitted, "5. Holt Trend-Corrected ES")
 accuracy_list[[5]] <- acc5; print(acc5)
 plot_forecast(tufe_long, holt_fitted, holt_forecast,
-              forecast_date, "Holt Trend Duzeltmeli ES", "holt_forecast_plot.png")
+              forecast_date, "Holt Trend Duzeltmeli ES", "trend_adjusted_smoothing_plot.png")
 ```
 
 ## Yöntem 6: Doğrusal Trend Projeksiyonu
@@ -311,7 +311,7 @@ cat("Dogrusal Trend Tahmini (Ocak 2026):", round(lm_forecast,2), "
 acc6 <- calc_accuracy(actual, lm_fitted, "6. Linear Trend Projection")
 accuracy_list[[6]] <- acc6; print(acc6)
 plot_forecast(tufe_long, lm_fitted, lm_forecast,
-              forecast_date, "Dogrusal Trend Projeksiyonu", "linear_trend_plot.png")
+              forecast_date, "Dogrusal Trend Projeksiyonu", "trend_projection_plot.png")
 ```
 
 ## Yöntem 7: Mevsimsel İndeksler
@@ -417,13 +417,22 @@ cat("Kukla Regresyon Tahmini (Ocak 2026):", round(dummy_forecast,2), "
 acc10 <- calc_accuracy(actual, dummy_fitted, "10. Trend + Seasonal Dummy Regression")
 accuracy_list[[10]] <- acc10; print(acc10)
 plot_forecast(tufe_long, dummy_fitted, dummy_forecast,
-              forecast_date, "Kukla Degiskenli Regresyon", "dummy_regression_plot.png")
+              forecast_date, "Kukla Degiskenli Regresyon", "regression_seasonal_dummy_plot.png")
 ```
 
 # Doğruluk Karşılaştırma Tablosu
 
 ```{r accuracy-table}
 accuracy_df <- bind_rows(accuracy_list)
+
+# Next-Period Forecast sütununu ekle
+forecast_vals <- c(
+  naive_forecast, ma_forecast, wma_forecast,
+  ses_forecast, holt_forecast, lm_forecast,
+  si_forecast, add_forecast, mul_forecast, dummy_forecast
+)
+accuracy_df$Next_Period_Forecast <- round(forecast_vals, 2)
+
 print(accuracy_df, digits=3)
 write.csv(accuracy_df, "outputs/tables/accuracy_comparison.csv", row.names=FALSE)
 
