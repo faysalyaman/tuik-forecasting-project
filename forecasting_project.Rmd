@@ -33,6 +33,18 @@ knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE,
 # Gerekli Paketler
 
 ```{r packages}
+# Install missing packages automatically
+required_packages <- c("httr","readxl","dplyr","tidyr",
+                       "lubridate","ggplot2","forecast","zoo","rmarkdown")
+new_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly=TRUE)]
+if (length(new_packages) > 0) install.packages(new_packages)
+
+# Install tuikr from GitHub if not available
+if (!requireNamespace("tuikr", quietly=TRUE)) {
+  if (!requireNamespace("devtools", quietly=TRUE)) install.packages("devtools")
+  devtools::install_github("emraher/tuikr")
+}
+
 library(tuikr)
 library(httr)
 library(readxl)
