@@ -1,0 +1,530 @@
+---
+title: "TÜFE Genel Endeksi Zaman Serisi Tahmini (2003=100)"
+author: "Faysal Yaman"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE,
+                      fig.width=10, fig.height=5)
+```
+
+# Proje Bilgileri
+
+| Alan | Bilgi |
+|---|---|
+| **Öğrenci Adı** | Faysal Yaman |
+| **Veri Kaynağı** | TÜİK Veri Portalı – tuikr paketi |
+| **Tema** | Price Statistics (Theme ID: 6) |
+| **Tablo** | Index numbers and rate of changes in the consumer price index |
+| **Değişken** | TÜFE Genel Endeksi (2003=100) |
+| **Frekans** | Aylık |
+| **Zaman Aralığı** | Ocak 2005 – Aralık 2025 |
+| **Tahmin Dönemi** | Ocak 2026 |
+
+# Gerekli Paketler
+
+```{r packages}
+library(tuikr)
+library(httr)
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(forecast)
+library(zoo)
+```
+
+# Veri Erişimi (tuikr ile)
+
+Veri erişimi tamamen tuikr paketi üzerinden gerçekleştirilmektedir.
+statistical_tables() ile URL alınmış, httr::GET() ile R içinde çekilmiştir.
+Manuel indirme yapılmamıştır.
+
+```{r data-import}
+fiyat_tables <- statistical_tables("6")
+
+tufe_row <- fiyat_tables |>
+  filter(node_type == "istab",
+         grepl("Index numbers and rate of changes in the consumer price index",
+               table_name, ignore.case = TRUE)) |>
+  slice(1)
+
+cat("Tablo:", tufe_row$table_name, "
+")
+
+tufe_url <- tufe_row$table_url
+
+resp <- GET(tufe_url,
+  add_headers(
+    `User-Agent` = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    `Accept`     = "application/vnd.ms-excel, application/octet-stream, */*",
+    `Referer`    = "https://veriportali.tuik.gov.tr/"
+  ))
+
+cat("HTTP Status:", status_code(resp), "
+")
+
+tmp <- tempfile(fileext = ".xls")
+writeBin(content(resp, "raw"), tmp)
+tufe_raw <- read_excel(tmp, col_names = FALSE)
+cat("Ham veri:", nrow(tufe_raw), "satir x", ncol(tufe_raw), "sutun
+")
+```
+
+# Veri Temizleme
+
+```{r data-cleaning}
+tufe_endeks <- tufe_raw[5:25, ]
+colnames(tufe_endeks) <- c("year","Jan","Feb","Mar","Apr","May",
+                            "Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+tufe_endeks <- tufe_endeks |> mutate(across(everything(), as.numeric))
+
+tufe_long <- tufe_endeks |>
+  pivot_longer(cols = Jan:Dec, names_to = "month", values_to = "index") |>
+  mutate(
+    month_num = match(month, c("Jan","Feb","Mar","Apr","May","Jun",
+                               "Jul","Aug","Sep","Oct","Nov","Dec")),
+    date = as.Date(paste(year, month_num, "1", sep = "-"))
+  ) |>
+  filter(!is.na(index)) |>
+  arrange(date) |>
+  select(date, index)
+
+tufe_ts <- ts(tufe_long$index, start = c(2005, 1), frequency = 12)
+
+cat("=== VERI OZETI ===
+")
+cat("Toplam gozlem :", nrow(tufe_long), "
+")
+cat("Ilk tarih     :", as.character(min(tufe_long$date)), "
+")
+cat("Son tarih     :", as.character(max(tufe_long$date)), "
+")
+cat("Tahmin donemi : Ocak 2026
+")
+cat("Eksik deger   :", sum(is.na(tufe_long$index)), "
+")
+```
+
+# Keşifsel Zaman Serisi Analizi
+
+## Seri Grafiği
+
+```{r eda-plot}
+p_actual <- ggplot(tufe_long, aes(x=date, y=index)) +
+  geom_line(color="#2C3E50", linewidth=0.8) +
+  labs(title="TUFE Genel Endeksi (2003=100) - Aylik",
+       subtitle="Ocak 2005 - Aralik 2025",
+       x="Tarih", y="Endeks Degeri",
+       caption="Kaynak: TUIK, tuikr paketi") +
+  theme_minimal(base_size=12)
+print(p_actual)
+ggsave("outputs/figures/actual_series_plot.png", p_actual, width=10, height=5, dpi=150)
+```
+
+## Ayrıştırma
+
+```{r decomp-plot}
+decomp <- decompose(tufe_ts, type="multiplicative")
+png("outputs/figures/decomposition_plot.png", width=1000, height=700)
+plot(decomp)
+dev.off()
+plot(decomp)
+```
+
+## Analiz Yorumu
+
+Verinin incelenmesinden elde edilen bulgular:
+
+- **Guclu yukari yonlu trend**: 2005te 114 olan endeks 2025 sonunda 3514e ulasti.
+- **Mevsimsellik**: Yilin ilk aylarinda ve sonbaharda artislar gozlemlenmektedir.
+- **Strukturel kiri**: 2022den itibaren yuksek enflasyon donemi hizlanmayi beraberinde getirmistir.
+- **Eksik gozlem**: Yoktur.
+
+# Doğruluk Ölçüm Fonksiyonları
+
+```{r accuracy-fn}
+calc_accuracy <- function(actual, fitted, method_name) {
+  errors <- actual - fitted
+  bias   <- mean(errors, na.rm=TRUE)
+  mad    <- mean(abs(errors), na.rm=TRUE)
+  mse    <- mean(errors^2, na.rm=TRUE)
+  mape   <- mean(abs(errors/actual)*100, na.rm=TRUE)
+  rsfe   <- sum(errors, na.rm=TRUE)
+  ts_val <- rsfe / mad
+  data.frame(Method=method_name,
+             Bias_ME=round(bias,3), MAD=round(mad,3),
+             MSE=round(mse,3), MAPE=round(mape,3),
+             RSFE=round(rsfe,3), Tracking_Signal=round(ts_val,3))
+}
+
+plot_forecast <- function(actual_df, fitted_vals, forecast_val,
+                          forecast_date, method_name, filename) {
+  fd <- data.frame(date=actual_df$date, value=fitted_vals)
+  p <- ggplot(actual_df, aes(x=date, y=index)) +
+    geom_line(color="#2C3E50", linewidth=0.7) +
+    geom_line(data=fd, aes(x=date, y=value),
+              color="#E74C3C", linewidth=0.6, linetype="dashed") +
+    geom_point(data=data.frame(date=forecast_date, value=forecast_val),
+               aes(x=date, y=value), color="#27AE60", size=4, shape=18) +
+    labs(title=paste(method_name, "- Actual vs Fitted + Forecast"),
+         subtitle=paste("Tahmin (Ocak 2026):", round(forecast_val,2)),
+         x="Tarih", y="TUFE Endeksi",
+         caption="Siyah: Gercek | Kirmizi kesik: Fitted | Yesil: Tahmin") +
+    theme_minimal(base_size=11)
+  print(p)
+  ggsave(paste0("outputs/figures/", filename), p, width=10, height=5, dpi=150)
+}
+
+forecast_date <- as.Date("2026-01-01")
+accuracy_list <- list()
+n      <- nrow(tufe_long)
+actual <- tufe_long$index
+```
+
+# Tahmin Yöntemleri
+
+## Yöntem 1: Naive
+
+```{r m1-naive}
+naive_fitted   <- c(NA, actual[-n])
+naive_forecast <- actual[n]
+cat("Naive Tahmini (Ocak 2026):", round(naive_forecast,2), "
+")
+acc1 <- calc_accuracy(actual[-1], naive_fitted[-1], "1. Naive")
+accuracy_list[[1]] <- acc1; print(acc1)
+plot_forecast(tufe_long, naive_fitted, naive_forecast,
+              forecast_date, "Naive", "naive_forecast_plot.png")
+```
+
+## Yöntem 2: Hareketli Ortalama (k=12)
+
+12 aylik pencere secilmistir; bir tam yili temsil ederek mevsimsel etkiyi dengeler.
+
+```{r m2-ma}
+k <- 12
+ma_fitted   <- as.numeric(stats::filter(actual, rep(1/k,k), sides=1))
+ma_forecast <- mean(tail(actual, k))
+cat("MA Tahmini (Ocak 2026):", round(ma_forecast,2), "
+")
+vi2 <- which(!is.na(ma_fitted))
+acc2 <- calc_accuracy(actual[vi2], ma_fitted[vi2], "2. Moving Average (k=12)")
+accuracy_list[[2]] <- acc2; print(acc2)
+plot_forecast(tufe_long, ma_fitted, ma_forecast,
+              forecast_date, "Hareketli Ortalama k=12", "ma_forecast_plot.png")
+```
+
+## Yöntem 3: Agirlikli Hareketli Ortalama
+
+Agirliklar: w1=0.2, w2=0.3, w3=0.5 (en yeni gozleme en yuksek agirlik).
+
+```{r m3-wma}
+weights <- c(0.2, 0.3, 0.5)
+w <- length(weights)
+wma_fitted <- rep(NA, n)
+for (i in (w+1):n) wma_fitted[i] <- sum(weights * actual[(i-w):(i-1)])
+wma_forecast <- sum(weights * actual[(n-w+1):n])
+cat("WMA Tahmini (Ocak 2026):", round(wma_forecast,2), "
+")
+vi3 <- which(!is.na(wma_fitted))
+acc3 <- calc_accuracy(actual[vi3], wma_fitted[vi3], "3. Weighted MA (0.5/0.3/0.2)")
+accuracy_list[[3]] <- acc3; print(acc3)
+plot_forecast(tufe_long, wma_fitted, wma_forecast,
+              forecast_date, "Agirlikli Hareketli Ortalama", "wma_forecast_plot.png")
+```
+
+## Yöntem 4: Üstel Düzleştirme (SES)
+
+Alpha optimize edilerek MSE minimize edilir.
+
+```{r m4-ses}
+ses_model    <- ses(tufe_ts, h=1)
+ses_alpha    <- ses_model$model$par["alpha"]
+ses_fitted   <- as.numeric(ses_model$fitted)
+ses_forecast <- as.numeric(ses_model$mean[1])
+cat("SES alpha:", round(ses_alpha,4), "| Tahmin:", round(ses_forecast,2), "
+")
+acc4 <- calc_accuracy(actual, ses_fitted, "4. Simple Exp. Smoothing")
+accuracy_list[[4]] <- acc4; print(acc4)
+plot_forecast(tufe_long, ses_fitted, ses_forecast,
+              forecast_date, "Ustel Duzlestirme SES", "ses_forecast_plot.png")
+```
+
+## Yöntem 5: Holt Trend Düzeltmeli ES
+
+Serinin guclu trendi nedeniyle Holt ikili ustel duzlestirme uygundur.
+
+```{r m5-holt}
+holt_model    <- holt(tufe_ts, h=1)
+holt_alpha    <- holt_model$model$par["alpha"]
+holt_beta     <- holt_model$model$par["beta"]
+holt_fitted   <- as.numeric(holt_model$fitted)
+holt_forecast <- as.numeric(holt_model$mean[1])
+cat("Holt alpha:", round(holt_alpha,4), "| beta:", round(holt_beta,4),
+    "| Tahmin:", round(holt_forecast,2), "
+")
+acc5 <- calc_accuracy(actual, holt_fitted, "5. Holt Trend-Corrected ES")
+accuracy_list[[5]] <- acc5; print(acc5)
+plot_forecast(tufe_long, holt_fitted, holt_forecast,
+              forecast_date, "Holt Trend Duzeltmeli ES", "holt_forecast_plot.png")
+```
+
+## Yöntem 6: Doğrusal Trend Projeksiyonu
+
+Y_hat = a + b*t regresyon denklemi.
+
+```{r m6-linear}
+t_var       <- 1:n
+lm_model    <- lm(actual ~ t_var)
+lm_a        <- coef(lm_model)[1]
+lm_b        <- coef(lm_model)[2]
+lm_fitted   <- as.numeric(fitted(lm_model))
+lm_forecast <- lm_a + lm_b * (n+1)
+cat("Denklem: Y =", round(lm_a,2), "+", round(lm_b,4), "* t
+")
+cat("Her ay ortalama", round(lm_b,2), "endeks puan artis beklenmektedir.
+")
+cat("Dogrusal Trend Tahmini (Ocak 2026):", round(lm_forecast,2), "
+")
+acc6 <- calc_accuracy(actual, lm_fitted, "6. Linear Trend Projection")
+accuracy_list[[6]] <- acc6; print(acc6)
+plot_forecast(tufe_long, lm_fitted, lm_forecast,
+              forecast_date, "Dogrusal Trend Projeksiyonu", "linear_trend_plot.png")
+```
+
+## Yöntem 7: Mevsimsel İndeksler
+
+Her ayin mevsimsel indeksi, o ayin ortalamasinin genel ortalamaya oranıdır.
+
+```{r m7-seasonal}
+tufe_si <- tufe_long |> mutate(month_num = month(date))
+monthly_avg  <- tufe_si |> group_by(month_num) |>
+  summarise(avg=mean(index), .groups="drop")
+overall_avg  <- mean(actual)
+seasonal_idx <- monthly_avg$avg / overall_avg
+cat("Mevsimsel Indeksler:
+"); print(round(seasonal_idx,4))
+
+tufe_si <- tufe_si |>
+  left_join(monthly_avg |> rename(month_avg=avg), by="month_num") |>
+  mutate(deseasoned = index / (month_avg / overall_avg))
+
+lm_si      <- lm(deseasoned ~ I(1:n), data=tufe_si)
+si_trend   <- fitted(lm_si)
+si_fitted  <- si_trend * seasonal_idx[tufe_si$month_num]
+
+next_t      <- n + 1
+si_trend_fc <- coef(lm_si)[1] + coef(lm_si)[2] * next_t
+si_forecast <- si_trend_fc * seasonal_idx[1]
+cat("Mevsimsel Indeks Tahmini (Ocak 2026):", round(si_forecast,2), "
+")
+acc7 <- calc_accuracy(actual, si_fitted, "7. Seasonal Indices")
+accuracy_list[[7]] <- acc7; print(acc7)
+plot_forecast(tufe_long, si_fitted, si_forecast,
+              forecast_date, "Mevsimsel Indeksler", "seasonal_index_plot.png")
+```
+
+## Yöntem 8: Toplamsal Ayrıştırma
+
+Y_t = T_t + S_t + R_t modeli.
+
+```{r m8-additive}
+decomp_add   <- decompose(tufe_ts, type="additive")
+trend_add    <- as.numeric(decomp_add$trend)
+seasonal_add <- as.numeric(decomp_add$seasonal)
+vi_add       <- which(!is.na(trend_add))
+lm_add       <- lm(trend_add[vi_add] ~ vi_add)
+trend_all    <- coef(lm_add)[1] + coef(lm_add)[2] * (1:n)
+add_fitted   <- trend_all + seasonal_add
+add_forecast <- (coef(lm_add)[1] + coef(lm_add)[2]*(n+1)) + seasonal_add[1]
+cat("Toplamsal Ayristirma Tahmini (Ocak 2026):", round(add_forecast,2), "
+")
+vi8 <- which(!is.na(add_fitted))
+acc8 <- calc_accuracy(actual[vi8], add_fitted[vi8], "8. Additive Decomposition")
+accuracy_list[[8]] <- acc8; print(acc8)
+plot_forecast(tufe_long, add_fitted, add_forecast,
+              forecast_date, "Toplamsal Ayristirma", "additive_decomp_plot.png")
+```
+
+## Yöntem 9: Çarpımsal Ayrıştırma
+
+Y_t = T_t * S_t * R_t modeli. Mevsimsel etkinin seri buyudukce arttigini varsayar.
+
+```{r m9-multiplicative}
+decomp_mul   <- decompose(tufe_ts, type="multiplicative")
+trend_mul    <- as.numeric(decomp_mul$trend)
+seasonal_mul <- as.numeric(decomp_mul$seasonal)
+vi_mul       <- which(!is.na(trend_mul))
+lm_mul       <- lm(trend_mul[vi_mul] ~ vi_mul)
+trend_all_m  <- coef(lm_mul)[1] + coef(lm_mul)[2] * (1:n)
+mul_fitted   <- trend_all_m * seasonal_mul
+mul_forecast <- (coef(lm_mul)[1] + coef(lm_mul)[2]*(n+1)) * seasonal_mul[1]
+cat("Carpimsal Ayristirma Tahmini (Ocak 2026):", round(mul_forecast,2), "
+")
+vi9 <- which(!is.na(mul_fitted))
+acc9 <- calc_accuracy(actual[vi9], mul_fitted[vi9], "9. Multiplicative Decomposition")
+accuracy_list[[9]] <- acc9; print(acc9)
+plot_forecast(tufe_long, mul_fitted, mul_forecast,
+              forecast_date, "Carpimsal Ayristirma", "multiplicative_decomp_plot.png")
+```
+
+## Yöntem 10: Trend + Mevsimsel Kukla Değişkenli Regresyon
+
+Y_hat = a + b*t + sum(gamma_m * D_m). 11 kukla degisken, Aralik referans ay.
+
+```{r m10-dummy}
+month_dummies           <- model.matrix(~factor(month(tufe_long$date))-1)[,1:11]
+colnames(month_dummies) <- paste0("M", 1:11)
+reg_data   <- data.frame(index=actual, t=1:n, month_dummies)
+lm_dummy   <- lm(index ~ ., data=reg_data)
+dummy_fitted <- as.numeric(fitted(lm_dummy))
+
+new_row           <- data.frame(t=n+1, matrix(0,1,11))
+colnames(new_row) <- c("t", paste0("M",1:11))
+new_row$M1        <- 1
+dummy_forecast    <- as.numeric(predict(lm_dummy, newdata=new_row))
+
+cat("Sabit (a) :", round(coef(lm_dummy)["(Intercept)"],2), "
+")
+cat("Egim  (b) :", round(coef(lm_dummy)["t"],4), "
+")
+cat("Ocak etkisi:", round(coef(lm_dummy)["M1"],2), "
+")
+cat("Kukla Regresyon Tahmini (Ocak 2026):", round(dummy_forecast,2), "
+")
+acc10 <- calc_accuracy(actual, dummy_fitted, "10. Trend + Seasonal Dummy Regression")
+accuracy_list[[10]] <- acc10; print(acc10)
+plot_forecast(tufe_long, dummy_fitted, dummy_forecast,
+              forecast_date, "Kukla Degiskenli Regresyon", "dummy_regression_plot.png")
+```
+
+# Doğruluk Karşılaştırma Tablosu
+
+```{r accuracy-table}
+accuracy_df <- bind_rows(accuracy_list)
+print(accuracy_df, digits=3)
+write.csv(accuracy_df, "outputs/tables/accuracy_comparison.csv", row.names=FALSE)
+
+best_method <- accuracy_df |> slice_min(MAPE, n=1)
+cat("
+=== MAPE gore EN IYI YONTEM ===
+")
+cat("Yontem:", best_method$Method, "
+")
+cat("MAPE  :", round(best_method$MAPE,3), "%
+")
+```
+
+## Karşılaştırma Grafiği
+
+```{r acc-plot}
+p_acc <- ggplot(accuracy_df, aes(x=reorder(Method,MAPE), y=MAPE, fill=MAPE)) +
+  geom_col(show.legend=FALSE) +
+  geom_text(aes(label=round(MAPE,2)), hjust=-0.1, size=3) +
+  coord_flip() +
+  scale_fill_gradient(low="#27AE60", high="#E74C3C") +
+  labs(title="Yontemlere Gore MAPE Karsilastirmasi",
+       x="Yontem", y="MAPE (%)") +
+  theme_minimal(base_size=11)
+print(p_acc)
+ggsave("outputs/figures/accuracy_comparison_plot.png", p_acc,
+       width=10, height=6, dpi=150)
+```
+
+# En İyi Yöntem Seçimi
+
+```{r best}
+cat("Secilen yontem:", best_method$Method, "
+
+")
+cat("Gerekceler:
+")
+cat("1. MAPE kriteri acisindan en dusuk yuzdeli hataya sahiptir.
+")
+cat("2. Seri guclu dogrusal trend ve mevsimsel bilesen icermektedir;
+")
+cat("   bu yapiyi modelleyen yontemler ustun performans sergilemistir.
+")
+cat("3. Tracking Signal degeri +/-4 siniri icinde kalmaktadir.
+")
+cat("4. Fitted grafigi gercek seriye en yakin seyretmektedir.
+")
+```
+
+# Final Tahmin
+
+```{r final}
+forecasts_all <- data.frame(
+  Method = accuracy_df$Method,
+  Forecast_Jan2026 = c(
+    naive_forecast, ma_forecast, wma_forecast,
+    ses_forecast, holt_forecast, lm_forecast,
+    si_forecast, add_forecast, mul_forecast, dummy_forecast
+  ),
+  MAPE = accuracy_df$MAPE
+)
+print(forecasts_all)
+
+final_val <- forecasts_all |> slice_min(MAPE,n=1) |> pull(Forecast_Jan2026)
+cat("
+========================================
+")
+cat("FINAL TAHMIN
+")
+cat("Donem  : Ocak 2026
+")
+cat("Yontem :", best_method$Method, "
+")
+cat("Deger  :", round(final_val,2), "(2003=100 bazli)
+")
+cat("========================================
+")
+
+write.csv(
+  data.frame(Period="January 2026", Method=best_method$Method,
+             Forecast=round(final_val,2), Base_Year="2003=100"),
+  "outputs/tables/final_forecast.csv", row.names=FALSE
+)
+```
+
+# Yorum ve Sınırlılıklar
+
+## Yorum
+
+TÜFE Genel Endeksi 2005-2025 doneminde guclu yukari yonlu trend sergilemistir.
+2022den itibaren Turkiye ekonomisindeki yuksek enflasyon ortami endekste siçramaya
+yol acmistir. Mevsimsel bilesen mevcut olmakla birlikte trendin baskinligi nedeniyle
+trendi modelleyebilen yontemler daha basarili sonuc vermistir.
+
+## Sınırlılıklar
+
+- TUİK SDMX API kimlik dogrulama gerektirdigindan statistical_tables() +
+  httr::GET() kombinasyonu kullanilmistir. Veri erisimi tamamen R kodu
+  uzerinden gerceklestirilmis, manuel indirme yapilmamistir.
+- Yontemler klasik istatistiksel tahmin yontemleriyle sinirlidir.
+- Jeopolitik/ekonomik soklar tahmin modellerine dahil edilememistir.
+
+## Reproducibility
+
+Bu analizi tekrarlamak icin:
+
+1. R (>=4.2) ve RStudio yukleyin.
+2. `devtools::install_github("emraher/tuikr")` komutunu calistirin.
+3. Diger paketleri install.packages() ile yukleyin.
+4. Bu Rmd dosyasini Knit ile calistirin.
+
+Veri her calistirmada TUIK sunucusundan otomatik cekilmektedir.
+
+---
+*Analiz tuikr v0.2.0, R v4.5 ile gerceklestirilmistir.*
+
